@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>五台山导览</title>
+<meta name="description" content="五台山游客导览地图：我在哪、去哪里、怎么走。寺院、台顶、停车与规划中的非遗馆。">
+<link rel="stylesheet" href="vendor/leaflet.css?v=20261027">
+<style>
+/* 布局：全屏地图为底，顶部是搜索与分类，底部是可上拉的信息卡 */
+:root {
+  --bg: #f4f6f5; --panel: #ffffff; --ink: #172326; --muted: #5d6a6c; --line: #dce2e2;
+  --qing: #2b6a6e; --jin: #9a7429; --zhu: #b34a32; --soft: #e3eeed;
+  --f: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --fs: "Songti SC", "STSong", "Noto Serif SC", serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #10171a; --panel: #1a2326; --ink: #e5eaea; --muted: #9aa7a8; --line: #2c383b; --qing: #74b6b5; --jin: #d4b066; --zhu: #e07a5f; --soft: #1f3336; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --bg: #10171a; --panel: #1a2326; --ink: #e5eaea; --muted: #9aa7a8; --line: #2c383b; --qing: #74b6b5; --jin: #d4b066; --zhu: #e07a5f; --soft: #1f3336; color-scheme: dark; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--f); -webkit-tap-highlight-color: transparent; }
+#map { position: fixed; inset: 0; background: #dfe6e2; }
+button { font: inherit; color: inherit; }
+
+.top { position: fixed; z-index: 1000; left: 0; right: 0; top: 0; padding: calc(env(safe-area-inset-top, 0px) + 10px) max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px)); pointer-events: none; }
+.top > * { pointer-events: auto; }
+.search { display: flex; align-items: center; gap: 8px; background: var(--panel); border-radius: 12px; padding: 0 12px; height: 46px; box-shadow: 0 4px 16px rgba(0,0,0,.14); }
+.search .brand { font-family: var(--fs); font-weight: 900; white-space: nowrap; color: var(--qing); }
+.search input { flex: 1; min-width: 0; border: none; background: transparent; font: inherit; font-size: 16px; color: var(--ink); outline: none; height: 100%; }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding: 8px 0 4px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: none; border: none; background: var(--panel); border-radius: 99px; padding: 6px 12px; font-size: 13px; box-shadow: 0 2px 8px rgba(0,0,0,.1); cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--qing); color: #fff; }
+.results { background: var(--panel); border-radius: 12px; margin-top: 6px; max-height: 46vh; overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,.14); }
+.results button { display: flex; width: 100%; text-align: left; border: none; background: none; padding: 11px 14px; border-bottom: 1px solid var(--line); gap: 10px; align-items: center; cursor: pointer; font-size: 15px; }
+.results button small { color: var(--muted); margin-left: auto; font-size: 12px; white-space: nowrap; }
+
+.fab { position: fixed; z-index: 1000; right: max(12px, env(safe-area-inset-right, 0px)); display: grid; gap: 8px; bottom: 240px; transition: bottom .2s; }
+.fab button { width: 46px; height: 46px; border-radius: 12px; border: none; background: var(--panel); box-shadow: 0 4px 14px rgba(0,0,0,.16); font-size: 13px; font-weight: 700; cursor: pointer; }
+.fab button.on { background: var(--qing); color: #fff; }
+
+.sheet { position: fixed; z-index: 1001; left: 0; right: 0; bottom: 0; background: var(--panel); border-radius: 18px 18px 0 0; box-shadow: 0 -6px 24px rgba(0,0,0,.16); padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 14px) max(16px, env(safe-area-inset-left, 0px)); max-height: 62vh; overflow-y: auto; }
+.sheet .grip { width: 60px; height: 22px; margin: -6px auto 2px; cursor: pointer; position: relative; }
+.sheet .grip::before { content: ""; position: absolute; left: 10px; right: 10px; top: 9px; height: 4px; border-radius: 2px; background: var(--line); }
+.sheet.mini > :not(.grip):not(h2):not(.tag) { display: none; }
+.sheet h2 { margin: 0; font-family: var(--fs); font-size: 21px; }
+.sheet .meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; color: var(--muted); margin-top: 6px; }
+.sheet p { font-size: 14px; line-height: 1.7; margin: 10px 0 0; }
+.row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.btn { border: none; border-radius: 10px; padding: 10px 16px; font-size: 15px; font-weight: 700; background: var(--soft); color: var(--qing); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; }
+.btn.primary { background: var(--qing); color: #fff; }
+.tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--soft); color: var(--qing); }
+.tag.plan { background: #f2e9d3; color: #8a6820; }
+.lines { display: grid; gap: 8px; margin-top: 10px; }
+.lines button { text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 12px 14px; cursor: pointer; }
+.lines b { display: block; font-size: 15px; }
+.lines span { font-size: 12px; color: var(--muted); }
+.toast { position: fixed; z-index: 1002; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 110px); background: rgba(23,35,38,.92); color: #fff; padding: 8px 14px; border-radius: 10px; font-size: 13px; max-width: 86vw; text-align: center; }
+.steps { margin: 10px 0 0; padding-left: 1.2em; font-size: 14px; line-height: 1.8; }
+.note { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.6; }
+
+/* 地图标注 */
+.pin { display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -100%); white-space: nowrap; pointer-events: auto; }
+.pin i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); background: var(--c); }
+.pin span { font-size: 12px; color: #172326; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; margin-top: 1px; font-family: var(--f); }
+.pin.big span { font-family: var(--fs); font-weight: 900; font-size: 14px; }
+.pin.plan i { border-radius: 4px; width: 18px; height: 18px; display: grid; place-items: center; color: #fff; font-style: normal; font-size: 11px; font-weight: 900; font-family: var(--fs); }
+.hide-labels .pin:not(.big) span { display: none; }
+.me { width: 18px; height: 18px; border-radius: 50%; background: #2f80ed; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(47,128,237,.25); transform: translate(-50%, -50%); }
+.leaflet-container { font-family: var(--f); background: #dfe6e2; }
+.leaflet-control-attribution { font-size: 10px; }
+</style>
+</head>
+<body>
+<div id="map" aria-label="五台山导览地图"></div>
+
+<div class="top">
+  <div class="search">
+    <span class="brand">五台导览</span>
+    <input id="q" type="search" placeholder="搜索寺院、台顶、村落" autocomplete="off" aria-label="搜索地点">
+  </div>
+  <div class="chips" id="chips" role="toolbar" aria-label="分类"></div>
+  <div class="results" id="results" hidden></div>
+</div>
+
+<div class="fab">
+  <button type="button" id="b-layer" title="切换底图">卫星</button>
+  <button type="button" id="b-locate" title="我的位置">定位</button>
+</div>
+
+<div class="sheet" id="sheet" aria-live="polite"></div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="vendor/leaflet.js?v=20261027"></script>
+<script src="data/guide.js?v=20261027"></script>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var PLAN_SITE = 'https://whmiealy.github.io/wutaishan-plan/';
+  var KIND = {
+    temple: ['寺院', '#a65a40'], peak: ['台顶', '#2b6a6e'], sight: ['景点', '#5f9a9c'], village: ['村落', '#7d8b6a'],
+    parking: ['停车', '#4a6fa5'], hotel: ['住宿', '#8a6f9e'], plan: ['非遗馆（规划）', '#9a7429']
+  };
+  var CHIPS = [['all', '全部'], ['temple', '寺院'], ['peak', '五座台顶'], ['plan', '非遗馆'], ['sight', '景点'], ['village', '村落'], ['parking', '停车']];
+  var HOME = [39.0077, 113.5895];   // 塔院寺大白塔
+
+  // ---------- 地图 ----------
+  var map = L.map('map', { zoomControl: false, attributionControl: true, minZoom: 11, maxZoom: 18, preferCanvas: true, maxBounds: L.latLngBounds(GD.bounds.region).pad(0.15) });
+  map.attributionControl.setPrefix('').addAttribution('© OpenStreetMap 贡献者 · Sentinel-2 cloudless 2016 by EOX · AWS Terrain Tiles');
+  var relief = L.layerGroup([L.imageOverlay('img/relief_region.jpg', GD.bounds.region), L.imageOverlay('img/relief_taihuai.jpg', GD.bounds.taihuai)]).addTo(map);
+  var sat = L.layerGroup([L.imageOverlay('img/sat_region.jpg', GD.bounds.region), L.imageOverlay('img/sat_taihuai.jpg', GD.bounds.taihuai)]);
+  var cv = L.canvas({ padding: 0.3 });
+  var vec = L.layerGroup().addTo(map);
+  GD.water.forEach(function (w) { L.polyline(w, { renderer: cv, color: '#6fa8d6', weight: 2, opacity: 0.8, interactive: false }).addTo(vec); });
+  GD.buildings.forEach(function (b) { L.polygon(b, { renderer: cv, color: '#b9b1a3', weight: 0.6, fillColor: '#e2dbcf', fillOpacity: 0.9, interactive: false }).addTo(vec); });
+  GD.paths.forEach(function (r) { L.polyline(r.p, { renderer: cv, color: '#8a7a5c', weight: 1.4, dashArray: '4 4', opacity: 0.85, interactive: false }).addTo(vec); });
+  var roadCasing = [], roadFill = [];
+  GD.roads.forEach(function (r) {
+    roadCasing.push(L.polyline(r.p, { renderer: cv, color: '#b8ab92', weight: r.c === 3 ? 7 : 4.5, opacity: 0.9, interactive: false }).addTo(vec));
+    roadFill.push(L.polyline(r.p, { renderer: cv, color: r.c === 3 ? '#f6dc9a' : '#ffffff', weight: r.c === 3 ? 5 : 3, opacity: 1, interactive: false }).addTo(vec));
+  });
+  var planRoute = L.polyline(GD.route, { renderer: cv, color: '#b34a32', weight: 4, opacity: 0.75, dashArray: '10 8', interactive: false });
+
+  // ---------- 标注 ----------
+  var markers = [], cat = 'all';
+  GD.pois.forEach(function (p, i) {
+    p.i = i;
+    var big = p.k === 'peak' || p.k === 'plan' || ['塔院寺', '显通寺', '菩萨顶', '黛螺顶', '五爷庙', '殊像寺'].indexOf(p.n) >= 0;
+    var html = '<div class="pin ' + (big ? 'big ' : '') + (p.k === 'plan' ? 'plan' : '') + '" style="--c:' + KIND[p.k][1] + '"><i>' + (p.g || (p.k === 'plan' ? '心' : '')) + '</i><span>' + p.n + '</span></div>';
+    var m = L.marker(p.p, { icon: L.divIcon({ className: '', html: html, iconSize: null }), riseOnHover: true, zIndexOffset: big ? 500 : 0 });
+    m.on('click', function () { openPoi(p); });
+    p.m = m; p.big = big; markers.push(m);
+  });
+  function refreshMarkers() {
+    var z = map.getZoom();
+    GD.pois.forEach(function (p) {
+      var show = (cat === 'all' || cat === p.k) && (p.big || z >= 14 || cat !== 'all') && (p.k !== 'village' || z >= 13 || cat === 'village');
+      if (show && !map.hasLayer(p.m)) p.m.addTo(map); else if (!show && map.hasLayer(p.m)) map.removeLayer(p.m);
+    });
+    document.body.classList.toggle('hide-labels', z < 14 && cat === 'all');
+  }
+  map.on('zoomend', refreshMarkers);
+
+  $('chips').innerHTML = CHIPS.map(function (c) { return '<button type="button" class="chip" data-c="' + c[0] + '" aria-pressed="' + (c[0] === 'all') + '">' + c[1] + '</button>'; }).join('');
+  $('chips').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-c]'); if (!b) return;
+    cat = b.dataset.c; document.querySelectorAll('.chip').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+    refreshMarkers();
+    if (cat === 'peak' || cat === 'plan') { map.fitBounds(L.latLngBounds(GD.pois.filter(function (p) { return p.k === cat; }).map(function (p) { return p.p; })).pad(0.25)); if (cat === 'plan') planRoute.addTo(map); }
+    else if (cat !== 'all') map.fitBounds(GD.bounds.taihuai);
+    if (cat === 'all') showHome();
+  });
+
+  // ---------- 底图切换 ----------
+  var useSat = false;
+  $('b-layer').addEventListener('click', function () {
+    useSat = !useSat;
+    if (useSat) { map.removeLayer(relief); sat.addTo(map); roadCasing.concat(roadFill).forEach(function (l) { l.setStyle({ opacity: 0.55 }); }); }
+    else { map.removeLayer(sat); relief.addTo(map); roadCasing.concat(roadFill).forEach(function (l) { l.setStyle({ opacity: 1 }); }); }
+    sat.eachLayer(function (l) { l.bringToBack(); }); relief.eachLayer(function (l) { l.bringToBack(); });
+    this.textContent = useSat ? '地形' : '卫星';
+  });
+
+  // ---------- 定位 ----------
+  var me = null, meMarker = null, meCircle = null, watchId = null, follow = false;
+  function toast(t, ms) { var el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { el.hidden = true; }, ms || 3000); }
+  function inArea(ll) { return L.latLngBounds(GD.bounds.region).contains(ll); }
+  $('b-locate').addEventListener('click', function () {
+    if (!navigator.geolocation) { toast('当前浏览器不支持定位'); return; }
+    follow = true; this.classList.add('on');
+    if (me) { map.setView(me, Math.max(map.getZoom(), 16)); }
+    if (watchId != null) return;
+    toast('正在定位…');
+    watchId = navigator.geolocation.watchPosition(function (pos) {
+      var ll = L.latLng(pos.coords.latitude, pos.coords.longitude), first = !me; me = ll;
+      if (!meMarker) { meMarker = L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="me"></div>', iconSize: null }), zIndexOffset: 2000, interactive: false }).addTo(map); meCircle = L.circle(ll, { radius: pos.coords.accuracy, color: '#2f80ed', weight: 1, fillOpacity: 0.08, interactive: false }).addTo(map); }
+      else { meMarker.setLatLng(ll); meCircle.setLatLng(ll).setRadius(pos.coords.accuracy); }
+      if (!inArea(ll)) { if (first) toast('您目前不在五台山景区范围内，导航将从台怀镇出发'); }
+      else if (first || follow) map.setView(ll, Math.max(map.getZoom(), 16));
+      if (first) showHome();
+    }, function (err) {
+      toast(err.code === 1 ? '没有获得定位权限：请在微信或浏览器设置里允许使用位置' : '暂时无法定位，请到开阔处再试', 4000);
+      $('b-locate').classList.remove('on'); watchId = null;
+    }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
+  });
+  map.on('dragstart', function () { follow = false; $('b-locate').classList.remove('on'); });
+
+  // ---------- 路网与步行导航 ----------
+  var nodes = {}, adj = [], pts = [];
+  function key(p) { return p[0].toFixed(5) + ',' + p[1].toFixed(5); }
+  function node(p) { var k = key(p); if (nodes[k] == null) { nodes[k] = pts.length; pts.push(p); adj.push([]); } return nodes[k]; }
+  function dist(a, b) { var R = 6371000, la = a[0] * Math.PI / 180, lb = b[0] * Math.PI / 180, dl = (b[1] - a[1]) * Math.PI / 180; var x = dl * Math.cos((la + lb) / 2), y = lb - la; return R * Math.sqrt(x * x + y * y); }
+  GD.roads.concat(GD.paths).forEach(function (r) {
+    var speed = r.c === 1 ? 0.75 : 1.2;   // 米/秒：山路约2.7公里/时，道路约4.3公里/时
+    for (var i = 1; i < r.p.length; i++) { var a = node(r.p[i - 1]), b = node(r.p[i]), d = dist(r.p[i - 1], r.p[i]); adj[a].push([b, d, d / speed]); adj[b].push([a, d, d / speed]); }
+  });
+  function nearest(ll) { var best = 0, bd = Infinity; for (var i = 0; i < pts.length; i++) { var d = dist(ll, pts[i]); if (d < bd) { bd = d; best = i; } } return [best, bd]; }
+  function route(from, to) {
+    var s = nearest(from), t = nearest(to), n = pts.length, cost = new Float64Array(n).fill(Infinity), len = new Float64Array(n), prev = new Int32Array(n).fill(-1);
+    var heap = [[0, s[0]]]; cost[s[0]] = 0;
+    function push(x) { heap.push(x); var i = heap.length - 1; while (i > 0) { var p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; var tmp = heap[p]; heap[p] = heap[i]; heap[i] = tmp; i = p; } }
+    function pop() { var top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; var i = 0; for (;;) { var l = 2 * i + 1, r = l + 1, m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; var tmp = heap[m]; heap[m] = heap[i]; heap[i] = tmp; i = m; } } return top; }
+    while (heap.length) {
+      var cur = pop(), u = cur[1]; if (cur[0] > cost[u]) continue; if (u === t[0]) break;
+      adj[u].forEach(function (e) { var c = cost[u] + e[2]; if (c < cost[e[0]]) { cost[e[0]] = c; len[e[0]] = len[u] + e[1]; prev[e[0]] = u; push([c, e[0]]); } });
+    }
+    if (!isFinite(cost[t[0]])) return null;
+    var path = []; for (var v = t[0]; v !== -1; v = prev[v]) path.push(pts[v]); path.reverse();
+    return { path: [from].concat(path, [to]), meters: len[t[0]] + s[1] + t[1], secs: cost[t[0]] + (s[1] + t[1]) / 1.0 };
+  }
+  var routeLine = null;
+  function fmtDist(m) { return m >= 1000 ? (m / 1000).toFixed(1) + ' 公里' : Math.round(m / 10) * 10 + ' 米'; }
+  function fmtTime(s) { var m = Math.round(s / 60); return m >= 60 ? Math.floor(m / 60) + ' 小时 ' + (m % 60) + ' 分' : Math.max(1, m) + ' 分钟'; }
+  function startPoint() { return me && inArea(me) ? [me.lat, me.lng] : HOME; }
+  function go(p) {
+    var from = startPoint(), r = route(from, p.p);
+    if (routeLine) map.removeLayer(routeLine);
+    if (!r) { toast('附近没有可用道路数据，请按现场指示牌前往'); return; }
+    routeLine = L.layerGroup([L.polyline(r.path, { color: '#ffffff', weight: 9, opacity: 0.9 }), L.polyline(r.path, { color: '#2f80ed', weight: 5, opacity: 1 })]).addTo(map);
+    map.fitBounds(L.latLngBounds(r.path).pad(0.2));
+    var mount = p.k === 'peak' || p.k === 'plan' && p.g;
+    $('sheet').innerHTML = '<div class="grip"></div><span class="tag">步行路线</span><h2 style="margin-top:6px">到 ' + p.n + '</h2>' +
+      '<div class="meta"><span>' + fmtDist(r.meters) + '</span><span>约 ' + fmtTime(r.secs) + '</span><span>' + (me && inArea(me) ? '从您的位置出发' : '从台怀镇（塔院寺）出发') + '</span></div>' +
+      (mount ? '<p>前往台顶路程较长、海拔高，建议乘坐景区交通车或报名朝台线路，注意保暖与补水。</p>' : '') +
+      '<div class="row"><button type="button" class="btn" id="b-back">返回详情</button><button type="button" class="btn" id="b-clear">结束导航</button></div>' +
+      '<p class="note">路线按开放地图的道路与山路计算，现场请以景区指示牌和交通管制为准。</p>';
+    $('b-back').onclick = function () { openPoi(p); };
+    $('b-clear').onclick = function () { if (routeLine) map.removeLayer(routeLine); routeLine = null; showHome(); };
+  }
+
+  // ---------- 信息卡 ----------
+  var DESC = {
+    '塔院寺': '塔院寺大白塔是五台山的标志，塔高约56米。', '显通寺': '五台山规模最大、历史最久的寺院之一。', '菩萨顶': '位于灵鹫峰顶，需登108级台阶。',
+    '黛螺顶': '传统上有“小朝台”之说，可以一次礼拜五方文殊。', '五爷庙': '即万佛阁，香火很旺，游客众多。', '殊像寺': '供奉五台山最大的文殊像之一。'
+  };
+  function distText(p) { if (!me || !inArea(me)) return ''; return '<span>距您 ' + fmtDist(dist([me.lat, me.lng], p.p)) + '</span>'; }
+  function openPoi(p) {
+    map.setView(p.p, Math.max(map.getZoom(), p.k === 'peak' || (p.k === 'plan' && p.g) ? 14 : 16));
+    var desc = DESC[p.n] || (p.k === 'peak' ? '五台之一，海拔' + p.ele + '米。台顶气温比台怀镇低得多，夏季也需带外套。' : p.k === 'plan' ? '这是《五台山非遗馆建设方案》中规划的设施，尚未建成。' + (p.note ? p.note + '。' : '') : '');
+    $('sheet').innerHTML = '<div class="grip"></div><span class="tag' + (p.k === 'plan' ? ' plan' : '') + '">' + KIND[p.k][0] + '</span><h2 style="margin-top:6px">' + p.n + '</h2>' +
+      '<div class="meta">' + distText(p) + (p.ele ? '<span>海拔 ' + p.ele + ' 米</span>' : '') + '</div>' + (desc ? '<p>' + desc + '</p>' : '') +
+      '<div class="row"><button type="button" class="btn primary" id="b-go">到这里去</button>' + (p.k === 'plan' ? '<a class="btn" href="' + PLAN_SITE + '#3d-region-p3" target="_blank" rel="noopener">看三维方案</a>' : '') + '<button type="button" class="btn" id="b-home">返回</button></div>';
+    $('b-go').onclick = function () { go(p); };
+    $('b-home').onclick = showHome;
+    try { history.replaceState(null, '', '#poi-' + p.i); } catch (e) {}
+  }
+  function showHome() {
+    var lines = [
+      ['台怀寺院步行线', '塔院寺 → 显通寺 → 菩萨顶 → 罗睺寺 → 五爷庙，约半天', ['塔院寺', '显通寺', '菩萨顶', '罗睺寺', '五爷庙']],
+      ['朝台径（规划中）', '心馆 → 东台 → 北台 → 中台 → 西台 → 南台，约71公里，两天', null]
+    ];
+    $('sheet').innerHTML = '<div class="grip"></div><h2>欢迎来到五台山</h2><div class="meta"><span>' + (me && inArea(me) ? '已定位到您的位置' : '点右侧“定位”查看您在哪里') + '</span></div>' +
+      '<div class="lines">' + lines.map(function (l, i) { return '<button type="button" data-l="' + i + '"><b>' + l[0] + '</b><span>' + l[1] + '</span></button>'; }).join('') + '</div>' +
+      '<p class="note">点地图上的地点查看详情和步行路线。标为“规划”的非遗馆与分馆尚未建成。</p>';
+    $('sheet').querySelectorAll('[data-l]').forEach(function (b) {
+      b.onclick = function () {
+        var l = lines[+b.dataset.l];
+        if (!l[2]) { planRoute.addTo(map); map.fitBounds(planRoute.getBounds().pad(0.1)); toast('红色虚线为规划中的朝台径'); return; }
+        var stops = l[2].map(function (n) { return GD.pois.find(function (p) { return p.n === n; }); }).filter(Boolean), all = [];
+        for (var k = 1; k < stops.length; k++) { var r = route(stops[k - 1].p, stops[k].p); if (r) all = all.concat(r.path); }
+        if (routeLine) map.removeLayer(routeLine);
+        routeLine = L.layerGroup([L.polyline(all, { color: '#fff', weight: 9 }), L.polyline(all, { color: '#9a7429', weight: 5 })].concat(stops.map(function (s, i) { return L.circleMarker(s.p, { radius: 9, color: '#fff', weight: 2, fillColor: '#9a7429', fillOpacity: 1 }).bindTooltip(String(i + 1), { permanent: true, direction: 'center', className: '' }); }))).addTo(map);
+        map.fitBounds(L.latLngBounds(all).pad(0.25));
+        $('sheet').innerHTML = '<div class="grip"></div><span class="tag">推荐线路</span><h2 style="margin-top:6px">' + l[0] + '</h2><ol class="steps">' + stops.map(function (s) { return '<li>' + s.n + '</li>'; }).join('') + '</ol><div class="row"><button type="button" class="btn" id="b-home2">返回</button></div>';
+        $('b-home2').onclick = function () { if (routeLine) map.removeLayer(routeLine); routeLine = null; showHome(); };
+      };
+    });
+  }
+
+  // ---------- 搜索 ----------
+  $('q').addEventListener('input', function () {
+    var v = this.value.trim(), box = $('results');
+    if (!v) { box.hidden = true; return; }
+    var hits = GD.pois.filter(function (p) { return p.n.indexOf(v) >= 0; }).slice(0, 12);
+    box.innerHTML = hits.length ? hits.map(function (p) { return '<button type="button" data-i="' + p.i + '">' + p.n + '<small>' + KIND[p.k][0] + '</small></button>'; }).join('') : '<button type="button" disabled>没有找到，换个关键词试试</button>';
+    box.hidden = false;
+  });
+  $('results').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-i]'); if (!b) return;
+    var p = GD.pois[+b.dataset.i]; $('results').hidden = true; $('q').value = ''; $('q').blur();
+    if (!map.hasLayer(p.m)) p.m.addTo(map); openPoi(p);
+  });
+
+  // 浮动按钮始终在信息卡上方
+  function placeFab() { document.querySelector('.fab').style.bottom = ($('sheet').offsetHeight + 12) + 'px'; }
+  new ResizeObserver(placeFab).observe($('sheet'));
+  // 点击把手收起或展开信息卡
+  $('sheet').addEventListener('click', function (e) { if (e.target.classList.contains('grip')) this.classList.toggle('mini'); });
+
+  // ---------- 启动 ----------
+  map.fitBounds(GD.bounds.taihuai);
+  refreshMarkers();
+  var m = /^#poi-(\d+)$/.exec(location.hash);
+  if (m && GD.pois[+m[1]]) openPoi(GD.pois[+m[1]]); else showHome();
+})();
+</script>
+</body>
+</html>
